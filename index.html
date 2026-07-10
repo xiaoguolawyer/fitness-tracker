@@ -93,6 +93,12 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
 .prog-chart th{padding:4px;text-align:left;color:#666;border-bottom:1px solid #222}
 .prog-chart td{padding:4px;color:#aaa;border-bottom:1px solid #1a1a1a}
 .prog-chart .improvement{color:#4ade80}
+.ex-rm{font-size:11px;margin-top:4px;color:#c9a227;padding:4px 8px;border-radius:5px;background:#2a2410;display:inline-block}
+.ex-rm.none{color:#888;background:#1a1a1a}
+.rm-test-btn{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid #c9a227;color:#c9a227;cursor:pointer;margin-left:6px;font-weight:400}
+.save-ex input[type=number]{-moz-appearance:textfield}
+.save-ex input{font-size:14px}
+.rm-modal-note{font-size:12px;color:#aaa;margin:6px 0}
 </style>
 </head>
 <body>
@@ -119,19 +125,30 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
 <div class="modal-overlay" id="saveModal">
   <div class="modal">
     <h3>保存训练记录</h3>
-    <div id="saveSummary" style="font-size:13px;color:#aaa;margin-bottom:12px"></div>
-    <div class="rpe-slider">
-      <label>训练强度 RPE（1=极轻松，10=力竭）</label><br>
-      <span class="rpe-val" id="rpeDisplay">7</span>
-      <input type="range" min="1" max="10" value="7" id="rpeInput" oninput="document.getElementById('rpeDisplay').textContent=this.value">
-    </div>
-    <div style="margin:8px 0">
-      <label style="font-size:13px;color:#aaa">备注（可选）</label><br>
-      <input type="text" id="noteInput" placeholder="如：第3组感觉吃力" style="width:100%;background:#0f0f0f;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:8px;margin-top:4px">
-    </div>
+    <div id="saveSummary"></div>
     <div style="text-align:center;margin-top:16px">
       <button class="modal-btn primary" onclick="confirmSave()">✅ 确认保存</button>
       <button class="modal-btn secondary" onclick="closeModal('saveModal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- RM Test Modal -->
+<div class="modal-overlay" id="rmModal">
+  <div class="modal">
+    <h3>🔬 测 RM：<span id="rmExName"></span></h3>
+    <p class="rm-modal-note">选一个能做到力竭的次数（建议 8-12 次），做至动作开始变形即停，记录阻力与次数。这是你该动作的真实力量基线。</p>
+    <div style="margin:10px 0">
+      <label style="font-size:13px;color:#aaa">阻力 / 重量</label><br>
+      <input id="rmWeight" placeholder="如 20lb 或 15kg" style="width:100%;background:#0f0f0f;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:8px;margin-top:4px">
+    </div>
+    <div style="margin:10px 0">
+      <label style="font-size:13px;color:#aaa">力竭次数（做到做不动）</label><br>
+      <input id="rmReps" type="number" min="1" value="12" style="width:100%;background:#0f0f0f;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:8px;margin-top:4px">
+    </div>
+    <div style="text-align:center;margin-top:16px">
+      <button class="modal-btn primary" onclick="saveRm()">✅ 保存RM</button>
+      <button class="modal-btn secondary" onclick="closeModal('rmModal')">取消</button>
     </div>
   </div>
 </div>
@@ -173,6 +190,7 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
 const DEFAULT_CYCLE_START = '2026-06-14'; // 已含1天顺延
 const DAYS = ['推力+HIIT','拉力+核心','下肢+HIIT','主动恢复'];
 const WEIGHT_LADDER = ['15lb','20lb','25lb'];
+const RIR_TARGET = 2; // 训练留2次余量（≈RPE 8），RM减去它即为训练目标次数
 
 const PLAN = {
   push: {
@@ -266,6 +284,7 @@ let cycleStartDate = DEFAULT_CYCLE_START;
 let currentTab = 0;
 let checkedState = {};
 let history = [];
+let rmRecords = {};
 
 function init(){
   try {
@@ -274,6 +293,7 @@ function init(){
   currentTab = getDayIndex();
   checkedState = loadJSON('fitness_state', {});
   history = loadJSON('fitness_history', []);
+  rmRecords = loadJSON('fitness_rm', {});
   // 迁移旧文本日志
   migrateOldLog();
   render();
@@ -296,6 +316,10 @@ function saveState(){
 
 function saveHistory(){
   localStorage.setItem('fitness_history', JSON.stringify(history));
+}
+
+function saveRmStore(){
+  localStorage.setItem('fitness_rm', JSON.stringify(rmRecords));
 }
 
 // ============ 循环日期计算（支持顺延） ============
@@ -349,7 +373,7 @@ function getShiftCount(){
   return Math.round((current.getTime() - original.getTime()) / 86400000);
 }
 
-// ============ 渐进超负荷逻辑 ============
+// ============ 渐进超负荷逻辑（RM 锚定） ============
 function getLastSession(dayKey){
   // 找到同类型训练日的上一次记录
   for(let i = history.length - 1; i >= 0; i--){
@@ -371,104 +395,125 @@ function getExerciseHistory(dayKey, exerciseName){
   return result;
 }
 
+// 读取某动作的 RM 记录
+function getRm(name){
+  return rmRecords[name] || null;
+}
+
+// 把阻力字符串加重一档（健身房自由重量 +2.5kg / 弹力绳 +5lb）
+function bumpWeight(w){
+  const m = String(w).match(/([\d.]+)\s*([a-zA-Z%]*)/);
+  if(!m) return null;
+  const num = parseFloat(m[1]);
+  const unit = m[2] || '';
+  let add = 2.5;
+  if(/lb/i.test(unit)) add = 5;
+  return (num + add) + (unit ? unit : '');
+}
+
+// RM 锚定处方：训练次数 = RM次数 - 留余量(RIR_TARGET)
 function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
+  const rm = getRm(exercise.name);
   const lastSession = getLastSession(dayKey);
-  if(!lastSession){
+  let lastEx = null;
+  if(lastSession){
+    lastEx = (lastSession.exercises || []).find(e =>
+      e.name === exercise.name && e.ssIdx === ssIdx && e.exIdx === exIdx
+    );
+  }
+  const dateStr = lastSession ? lastSession.date.substring(5) : '';
+
+  // 情况1：尚未测 RM —— 回退到基准计划，并提示先测
+  if(!rm){
+    const base = '按基准：' + exercise.weight + ' × ' + exercise.minRep + '-' + exercise.maxRep + '次';
     return {
-      type: 'first',
-      lastText: '首次训练',
-      suggestText: '按基准计划：' + exercise.weight + ' × ' + exercise.minRep + '-' + exercise.maxRep + '次',
+      type: 'notest', rm: false, showTest: true,
+      lastText: lastSession ? ('上次 ' + dateStr + '（未测RM）') : '首次训练（未测RM）',
+      suggestText: base + ' · 建议先测RM校准',
       targetRep: exercise.minRep
     };
   }
 
-  const lastEx = (lastSession.exercises || []).find(e =>
-    e.name === exercise.name && e.ssIdx === ssIdx && e.exIdx === exIdx
-  );
+  // 已有 RM，计算训练目标次数
+  const targetRep = Math.max(1, rm.reps - RIR_TARGET);
 
+  // 情况2：有 RM 但无历史记录
   if(!lastEx){
     return {
-      type: 'first',
-      lastText: '上次未记录此动作',
-      suggestText: '按基准计划：' + exercise.weight + ' × ' + exercise.minRep + '-' + exercise.maxRep + '次',
-      targetRep: exercise.minRep
+      type: 'first', rm: true, showTest: true,
+      lastText: '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' (留' + RIR_TARGET + ')',
+      suggestText: '今天：' + rm.weight + ' × ' + targetRep + '次（你的' + rm.reps + 'RM，留' + RIR_TARGET + '次）',
+      targetRep: targetRep, rmWeight: rm.weight
     };
   }
 
-  const allDone = lastEx.completedSets >= lastEx.plannedSets;
-  const lastRPE = lastSession.rpe || 7;
-  const dateStr = lastSession.date.substring(5); // MM-DD
+  // 情况3：有 RM 也有历史
+  const lastRPE = (lastEx.rpe != null) ? lastEx.rpe : (lastSession.rpe || 7);
+  const lastCompleted = lastEx.completedSets >= lastEx.plannedSets;
+  const lastRep = lastEx.achievedRep || targetRep;
 
-  if(!allDone){
+  // 上次没做完 → 补齐
+  if(!lastCompleted){
     return {
-      type: 'catchup',
-      lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '/' + lastEx.plannedSets + '组 ⚠️',
-      suggestText: '今天补齐：' + exercise.weight + ' × ' + lastEx.plannedSets + '组 × ' + (lastEx.achievedRep || exercise.minRep) + '次',
-      targetRep: lastEx.achievedRep || exercise.minRep
+      type: 'catchup', rm: true,
+      lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '/' + lastEx.plannedSets + '组 ⚠️ · RPE' + lastRPE,
+      suggestText: '今天补齐：' + rm.weight + ' × ' + lastEx.plannedSets + '组 × ' + targetRep + '次',
+      targetRep: targetRep, rmWeight: rm.weight
     };
   }
 
-  // 全部完成
+  // 上次轻松完成（RPE≤7）
   if(lastRPE <= 7){
-    // 轻松完成，可以推进
-    const lastRep = lastEx.achievedRep || exercise.minRep;
-    if(lastRep < exercise.maxRep){
-      // 还在次数区间内，加1次
+    const roomToAdd = (lastRep + 1) < rm.reps; // 还能再加1次且不到RM
+    if(roomToAdd){
+      // 加1次
       return {
-        type: 'addRep',
-        lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '/' + lastEx.plannedSets + '组 · RPE' + lastRPE + ' ✅',
-        suggestText: '上次轻松完成，加1次：' + exercise.weight + ' × ' + (lastRep + 1) + '次',
-        targetRep: lastRep + 1
+        type: 'addRep', rm: true,
+        lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅',
+        suggestText: '上次轻松，加1次：' + rm.weight + ' × ' + (lastRep + 1) + '次',
+        targetRep: lastRep + 1, rmWeight: rm.weight
       };
-    } else {
-      // 次数到上限，检查是否可以加组
-      const planSuperset = getPlan(currentTab).supersets[ssIdx];
-      if(lastEx.plannedSets < 4){
-        return {
-          type: 'addSet',
-          lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅',
-          suggestText: '次数到上限，加1组：' + exercise.weight + ' × ' + (lastEx.plannedSets + 1) + '组 × ' + exercise.minRep + '次',
-          targetRep: exercise.minRep
-        };
-      } else {
-        // 组数也到上限，加重
-        const currentWeightIdx = WEIGHT_LADDER.indexOf(exercise.weight);
-        if(currentWeightIdx >= 0 && currentWeightIdx < WEIGHT_LADDER.length - 1){
-          const nextWeight = WEIGHT_LADDER[currentWeightIdx + 1];
-          return {
-            type: 'addWeight',
-            lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅',
-            suggestText: '次数组数都到顶，加重：' + nextWeight + ' × ' + exercise.minRep + '次',
-            targetRep: exercise.minRep,
-            newWeight: nextWeight
-          };
-        } else {
-          return {
-            type: 'maxed',
-            lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅',
-            suggestText: '已到极限，尝试慢速离心（4秒下放）',
-            targetRep: lastRep
-          };
-        }
-      }
     }
-  } else if(lastRPE >= 9){
-    // 很累，保持
+    // 已到 RM-1，仍有余力 → 先加组，再加重
+    if(lastEx.plannedSets < 4){
+      return {
+        type: 'addSet', rm: true,
+        lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次(RM-1) · RPE' + lastRPE + ' ✅',
+        suggestText: '次数到顶，加1组：' + rm.weight + ' × ' + (lastEx.plannedSets + 1) + '组 × ' + targetRep + '次',
+        targetRep: targetRep, rmWeight: rm.weight
+      };
+    }
+    // 组数也到顶 → 加重并提示重测 RM
+    const wi = WEIGHT_LADDER.indexOf(rm.weight);
+    let nextW = null;
+    if(wi >= 0 && wi < WEIGHT_LADDER.length - 1) nextW = WEIGHT_LADDER[wi + 1];
+    else nextW = bumpWeight(rm.weight);
+    if(nextW){
+      return {
+        type: 'addWeight', rm: true,
+        lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次(RM-1) · RPE' + lastRPE + ' ✅',
+        suggestText: '已达' + rm.reps + 'RM上限，加重：' + nextW + ' × ' + exercise.minRep + '次 · 重测RM',
+        targetRep: exercise.minRep, rmWeight: nextW, newWeight: nextW
+      };
+    }
+  }
+
+  // 上次很累（RPE≥9）或中等（RPE 8）→ 保持
+  if(lastRPE >= 9){
     return {
-      type: 'maintain',
-      lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '组 · RPE' + lastRPE + ' 😤',
-      suggestText: '上次很累，保持：' + exercise.weight + ' × ' + (lastEx.achievedRep || exercise.minRep) + '次',
-      targetRep: lastEx.achievedRep || exercise.minRep
-    };
-  } else {
-    // RPE 8，正常保持
-    return {
-      type: 'maintain',
-      lastText: '上次 ' + dateStr + ': ' + exercise.weight + ' × ' + lastEx.completedSets + '组 · ' + (lastEx.achievedRep || exercise.minRep) + '次 · RPE' + lastRPE,
-      suggestText: '保持：' + exercise.weight + ' × ' + (lastEx.achievedRep || exercise.minRep) + '次',
-      targetRep: lastEx.achievedRep || exercise.minRep
+      type: 'maintain', rm: true,
+      lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastRep + '次 · RPE' + lastRPE + ' 😤',
+      suggestText: '上次很累，保持：' + rm.weight + ' × ' + targetRep + '次',
+      targetRep: targetRep, rmWeight: rm.weight
     };
   }
+
+  return {
+    type: 'maintain', rm: true,
+    lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastRep + '次 · RPE' + lastRPE,
+    suggestText: '保持：' + rm.weight + ' × ' + targetRep + '次',
+    targetRep: targetRep, rmWeight: rm.weight
+  };
 }
 
 // ============ 打卡状态管理 ============
@@ -570,12 +615,37 @@ function openSaveModal(){
   const { total, done } = countDone();
   if(done === 0){ alert('还没有打卡任何项目'); return; }
   const plan = getPlan(currentTab);
-  document.getElementById('saveSummary').innerHTML =
-    '<strong>' + plan.name + '</strong><br>' +
-    '完成: ' + done + '/' + total + ' (' + Math.round(done/total*100) + '%)';
-  document.getElementById('rpeInput').value = 7;
-  document.getElementById('rpeDisplay').textContent = '7';
-  document.getElementById('noteInput').value = '';
+  const dayKey = getDayKey(currentTab);
+
+  let html = '<p style="font-size:13px;color:#aaa;margin-bottom:6px"><strong style="color:#fff">' + plan.name + '</strong> · 完成 ' + done + '/' + total + '</p>';
+  html += '<p class="rm-modal-note">逐动作填写实际阻力 / 次数 / 难度RPE。系统据此给出下次渐进建议。</p>';
+  html += '<div id="saveExList">';
+  let exCount = 0;
+  if(plan.supersets){
+    plan.supersets.forEach((ss, ssIdx) => {
+      ss.items.forEach((ex, exIdx) => {
+        const doneSets = (checkedState[dayKey + '_' + ssIdx + '_' + exIdx] || []).length;
+        if(doneSets === 0) return;
+        const sug = getProgressionSuggestion(dayKey, ssIdx, exIdx, ex);
+        const w = sug.rmWeight || ex.weight;
+        const r = sug.targetRep;
+        const rm = getRm(ex.name);
+        html += '<div class="save-ex" style="border-bottom:1px solid #222;padding:10px 0">';
+        html += '<div style="font-size:14px;font-weight:600">' + ex.name + (rm ? ' <span style="font-size:11px;color:#c9a227">RM ' + rm.weight + '×' + rm.reps + '</span>' : '') + '</div>';
+        html += '<div style="display:flex;gap:10px;margin-top:6px;align-items:center;flex-wrap:wrap">';
+        html += '阻力<input id="exw_' + ssIdx + '_' + exIdx + '" value="' + w + '" style="width:74px;background:#0f0f0f;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:6px">';
+        html += '次数<input id="exr_' + ssIdx + '_' + exIdx + '" type="number" min="1" value="' + r + '" style="width:56px;background:#0f0f0f;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:6px">';
+        html += '</div>';
+        html += '<div style="margin-top:6px;font-size:12px;color:#aaa">RPE <span id="exrpev_' + ssIdx + '_' + exIdx + '">7</span> <input type="range" min="1" max="10" value="7" id="exrpe_' + ssIdx + '_' + exIdx + '" oninput="document.getElementById(\'exrpev_' + ssIdx + '_' + exIdx + '\').textContent=this.value" style="width:55%;vertical-align:middle"></div>';
+        html += '</div>';
+        exCount++;
+      });
+    });
+  }
+  html += '</div>';
+  if(exCount === 0){ alert('请先打卡至少一项动作'); return; }
+  html += '<div style="margin:12px 0"><label style="font-size:13px;color:#aaa">备注（可选）</label><br><input type="text" id="noteInput" placeholder="如：第3组弯举吃力" style="width:100%;background:#0f0f0f;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:8px;margin-top:4px"></div>';
+  document.getElementById('saveSummary').innerHTML = html;
   document.getElementById('saveModal').classList.add('show');
 }
 
@@ -584,40 +654,42 @@ function confirmSave(){
   const plan = getPlan(currentTab);
   const dayKey = getDayKey(currentTab);
   const date = new Date().toISOString().split('T')[0];
-  const rpe = parseInt(document.getElementById('rpeInput').value);
-  const note = document.getElementById('noteInput').value;
 
-  // 构建结构化训练记录
   const session = {
     date: date,
     dayKey: dayKey,
     dayName: plan.name,
     completed: done === total,
     completionRate: Math.round(done / total * 100),
-    rpe: rpe,
-    note: note,
+    note: (document.getElementById('noteInput') || {}).value || '',
     exercises: []
   };
+  let rpeSum = 0, rpeCnt = 0;
 
-  // 记录每个动作的完成情况
   if(plan.supersets){
     plan.supersets.forEach((ss, ssIdx) => {
       ss.items.forEach((ex, exIdx) => {
         const doneSets = (checkedState[dayKey + '_' + ssIdx + '_' + exIdx] || []).length;
-        // 获取渐进超负荷建议中的目标次数
-        const suggestion = getProgressionSuggestion(dayKey, ssIdx, exIdx, ex);
+        if(doneSets === 0) return;
+        const wEl = document.getElementById('exw_' + ssIdx + '_' + exIdx);
+        const rEl = document.getElementById('exr_' + ssIdx + '_' + exIdx);
+        const rpeEl = document.getElementById('exrpe_' + ssIdx + '_' + exIdx);
+        const weight = wEl ? wEl.value.trim() : (getProgressionSuggestion(dayKey, ssIdx, exIdx, ex).rmWeight || ex.weight);
+        const reps = rEl ? (parseInt(rEl.value) || 1) : getProgressionSuggestion(dayKey, ssIdx, exIdx, ex).targetRep;
+        const rpe = rpeEl ? parseInt(rpeEl.value) : 7;
+        rpeSum += rpe; rpeCnt++;
         session.exercises.push({
-          name: ex.name,
-          ssIdx: ssIdx,
-          exIdx: exIdx,
-          weight: suggestion.newWeight || ex.weight,
+          name: ex.name, ssIdx: ssIdx, exIdx: exIdx,
+          weight: weight,
           plannedSets: ss.rounds,
           completedSets: doneSets,
-          achievedRep: suggestion.targetRep
+          achievedRep: reps,
+          rpe: rpe
         });
       });
     });
   }
+  session.rpe = rpeCnt ? Math.round(rpeSum / rpeCnt) : 7;
 
   // HIIT
   if(plan.hiit && plan.hiit.length > 0){
@@ -657,7 +729,7 @@ function confirmSave(){
 
   closeModal('saveModal');
   render();
-  alert('✅ 已保存！\n' + plan.name + ' · ' + done + '/' + total + ' · RPE ' + rpe + '\n下次训练将根据本次记录给出渐进建议');
+  alert('✅ 已保存！\n' + plan.name + ' · ' + done + '/' + total + ' · 平均RPE ' + session.rpe + '\n下次将根据逐动作RPE给出渐进建议');
 }
 
 // ============ 历史记录查看 ============
@@ -695,6 +767,7 @@ function showHistory(){
         entry.exercises.forEach(ex => {
           html += ex.name + ': ' + ex.weight + ' × ' + ex.completedSets + '/' + ex.plannedSets + '组';
           if(ex.achievedRep) html += ' · ' + ex.achievedRep + '次';
+          if(ex.rpe != null) html += ' · RPE' + ex.rpe;
           html += '<br>';
         });
       }
@@ -744,12 +817,15 @@ function showProgressionView(){
 
       if(exHistory.length === 0) return;
 
+      const rm = getRm(name);
       html += '<div class="prog-chart"><strong style="font-size:13px">' + name + '</strong>';
+      if(rm) html += ' <span style="font-size:11px;color:#c9a227">🔬 RM ' + rm.weight + '×' + rm.reps + '</span>';
       html += '<table><tr><th>日期</th><th>重量</th><th>组数</th><th>次数</th><th>RPE</th></tr>';
 
       let prevWeight = '', prevRep = 0;
       exHistory.forEach(s => {
         const ex = s.exercises.find(e => e.name === name);
+        const exRpe = (ex.rpe != null) ? ex.rpe : (s.rpe || '-');
         const weightChange = ex.weight !== prevWeight && prevWeight !== '';
         const repChange = ex.achievedRep > prevRep && prevRep > 0;
         html += '<tr>';
@@ -757,7 +833,7 @@ function showProgressionView(){
         html += '<td' + (weightChange ? ' class="improvement"' : '') + '>' + ex.weight + '</td>';
         html += '<td>' + ex.completedSets + '/' + ex.plannedSets + '</td>';
         html += '<td' + (repChange ? ' class="improvement"' : '') + '>' + (ex.achievedRep || '-') + '</td>';
-        html += '<td>' + (s.rpe || '-') + '</td>';
+        html += '<td' + ((exRpe !== '-' && exRpe <= 7) ? ' class="improvement"' : '') + '>' + exRpe + '</td>';
         html += '</tr>';
         prevWeight = ex.weight;
         prevRep = ex.achievedRep || 0;
@@ -781,7 +857,8 @@ function exportData(){
     exportDate: new Date().toISOString(),
     cycleStartDate: cycleStartDate,
     history: history,
-    state: checkedState
+    state: checkedState,
+    rmRecords: rmRecords
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -804,9 +881,11 @@ function importData(event){
       if(data.cycleStartDate) cycleStartDate = data.cycleStartDate;
       if(data.history) history = data.history;
       if(data.state) checkedState = data.state;
+      if(data.rmRecords) rmRecords = data.rmRecords;
       localStorage.setItem('fitness_cycle_start', cycleStartDate);
       saveHistory();
       saveState();
+      saveRmStore();
       currentTab = getDayIndex();
       closeModal('settingsModal');
       render();
@@ -893,6 +972,27 @@ function showSettings(){
   document.getElementById('settingsModal').classList.add('show');
 }
 
+// ============ RM 测试 ============
+let rmModalEx = '';
+function openRmModal(name, defaultWeight){
+  rmModalEx = name;
+  document.getElementById('rmExName').textContent = name;
+  document.getElementById('rmWeight').value = defaultWeight || '';
+  document.getElementById('rmReps').value = 12;
+  document.getElementById('rmModal').classList.add('show');
+}
+function saveRm(){
+  const w = document.getElementById('rmWeight').value.trim();
+  const r = parseInt(document.getElementById('rmReps').value);
+  if(!w || !r || r < 1){ alert('请填写有效的阻力和次数'); return; }
+  rmRecords[rmModalEx] = { weight: w, reps: r, date: new Date().toISOString().split('T')[0] };
+  saveRmStore();
+  closeModal('rmModal');
+  render();
+  const target = Math.max(1, r - RIR_TARGET);
+  alert('✅ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n训练处方：' + w + ' × ' + target + '次（留' + RIR_TARGET + '次余量）');
+}
+
 // ============ RENDER ============
 function switchTab(idx){
   if(timerRunning) stopTimer();
@@ -970,8 +1070,10 @@ function render(){
         const suggestClass = suggestion.type === 'catchup' ? 'warn' : 'suggest';
 
         html += '<div class="exercise"><div class="ex-con">';
-        html += '<div class="ex-name">' + ex.name + '</div>';
-        html += '<div class="ex-spec">' + (suggestion.newWeight || ex.weight) + ' · 目标' + suggestion.targetRep + '次/组</div>';
+        const rm = getRm(ex.name);
+        html += '<div class="ex-name">' + ex.name + ' <span class="rm-test-btn" onclick="openRmModal(\'' + ex.name + '\',\'' + (rm ? rm.weight : '') + '\')">🔬测RM</span></div>';
+        html += '<div class="ex-spec">' + (suggestion.rmWeight || ex.weight) + ' · 目标' + suggestion.targetRep + '次/组</div>';
+        html += '<div class="' + (rm ? 'ex-rm' : 'ex-rm none') + '">🔬 ' + (rm ? ('你的RM ' + rm.weight + '×' + rm.reps + ' (' + rm.date.substring(5) + ')') : '未测RM — 点上方「测RM」校准') + '</div>';
 
         // 渐进超负荷提示
         html += '<div class="ex-progress last">📊 ' + suggestion.lastText + '</div>';
