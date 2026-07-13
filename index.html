@@ -187,11 +187,12 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
 
 <script>
 // ============ DATA: 训练计划 ============
-const DEFAULT_CYCLE_START = '2026-06-14'; // 已含1天顺延
-const DAYS = ['推力+HIIT','拉力+核心','下肢+HIIT','主动恢复'];
+const DEFAULT_CYCLE_START = '2026-07-13'; // 6天滚动循环起点（推拉腿推拉腿休）
+const DAYS = ['推力+HIIT','拉力+核心','下肢+HIIT','推力+HIIT','拉力+核心','下肢+HIIT','主动恢复'];
+const DAY_KEYS = ['push','pull','legs','push','pull','legs','recovery'];
 const WEIGHT_LADDER = ['15lb','20lb','25lb'];
 const RIR_TARGET = 2; // 训练留2次余量（≈RPE 8），RM减去它即为训练目标次数
-const HYPERTROPHY_MAX = 12; // 增肌最优次数区间上限，RM超此值=重量太轻应加重
+const HYPERTROPHY_MAX = 25; // 实用上限：RM超此值才提示加重（5-30次均有效，见Schoenfeld2017）
 
 const PLAN = {
   push: {
@@ -206,7 +207,7 @@ const PLAN = {
         {name:'弹力绳站姿推举',weight:'15lb',minRep:10,maxRep:12,detail:'双脚与肩同宽踩绳，握把手于肩前。核心收紧、臀夹紧——防后仰借力。直线推至手臂伸直不锁肘。'},
         {name:'弹力绳侧平举',weight:'15lb',minRep:12,maxRep:15,detail:'踩绳，手垂体侧。微屈肘，肩关节为轴上抬至水平，拇指略朝下。身体不晃——晃了=太重。'}
       ]},
-      {label:'超集C',rounds:3,rest:45,items:[
+      {label:'超集C',rounds:3,rest:60,items:[
         {name:'弹力绳夹胸',weight:'15lb',minRep:12,maxRep:15,detail:'门锚高位，背对门微前倾。向胸前合拢像抱大树，合拢处停1秒挤胸肌。打开时控制，不靠弹力回弹。'},
         {name:'弹力绳臂屈伸',weight:'15lb',minRep:12,maxRep:15,detail:'门锚低位。双手过头握把，上臂贴耳固定——只有前臂在动。伸直时缩三头肌，弯时慢放。'}
       ]}
@@ -226,7 +227,7 @@ const PLAN = {
         {name:'弹力绳单臂划船',weight:'20lb',minRep:8,maxRep:12,detail:'踩绳，身体前倾45°，背打直。手沿体侧拉向髋，肘尖向后上方走。左右各做完一组才算一轮。'},
         {name:'弹力绳面拉',weight:'15lb',minRep:15,maxRep:15,detail:'同推力日面拉。拉力日第二次做——保护肩袖健康。'}
       ]},
-      {label:'超集C',rounds:3,rest:45,items:[
+      {label:'超集C',rounds:3,rest:60,items:[
         {name:'弹力绳弯举',weight:'15lb',minRep:12,maxRep:15,detail:'踩绳，掌朝前。上臂夹紧身体不动——弯举的灵魂是肘不晃。顶峰微停，下放2秒控制。'},
         {name:'锤式弯举',weight:'15lb',minRep:12,maxRep:15,detail:'同弯举但掌心相对。更侧重前臂肱桡肌。同样肘固定、不晃、控制离心。'}
       ]}
@@ -245,7 +246,7 @@ const PLAN = {
     name:'下肢日', emoji:'🦵',
     warmup:'开合跳60s → 髋绕环每侧10 → 自重深蹲10(慢下快上) → 猫牛式10',
     supersets:[
-      {label:'深蹲（单独做）',rounds:4,rest:90,items:[
+      {label:'深蹲（单独做）',rounds:4,rest:120,items:[
         {name:'弹力绳深蹲',weight:'20lb',minRep:10,maxRep:12,detail:'双脚略宽于肩，脚尖朝外15-30°。两绳踩脚下，绳从背后绕过斜方肌。髋先往后推再弯膝。大腿平地面，膝盖朝脚尖不内扣。起立蹬地，不锁膝。'}
       ]},
       {label:'超集A',rounds:4,rest:90,items:[
@@ -256,7 +257,7 @@ const PLAN = {
         {name:'弹力绳弓步蹲',weight:'20lb',minRep:8,maxRep:10,detail:'前脚踩绳，后脚跨大步踮脚。前膝朝脚尖不超脚尖，后膝近地不触。前腿蹬回。躯干直立不俯身。'},
         {name:'弹力绳髋外展',weight:'15lb',minRep:15,maxRep:20,detail:'侧躺，绳套膝上。上方腿伸直抬30-45°，小幅度慢速。感受臀中肌灼烧，腰不代偿。'}
       ]},
-      {label:'超集C',rounds:2,rest:45,items:[
+      {label:'超集C',rounds:2,rest:60,items:[
         {name:'保加利亚分腿蹲',weight:'自重',minRep:8,maxRep:10,detail:'后脚尖搭椅子。前腿蹲至大腿平，膝不超脚尖。前腿发力站起。先自重练平衡，两周后加绳。'},
         {name:'弹力绳腿弯举',weight:'15lb',minRep:12,maxRep:15,detail:'俯卧，绳套脚踝，门锚低位。大腿贴地不动，弯膝拉脚跟向臀，顶峰稍停，2-3秒慢放。'}
       ]}
@@ -328,15 +329,15 @@ function getDayIndex(){
   const start = new Date(cycleStartDate + 'T00:00:00+08:00');
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - start.getTime()) / 86400000);
-  return ((diffDays % 4) + 4) % 4;
+  return ((diffDays % DAYS.length) + DAYS.length) % DAYS.length;
 }
 
 function getPlan(idx){
-  return [PLAN.push, PLAN.pull, PLAN.legs, PLAN.recovery][idx];
+  return PLAN[DAY_KEYS[idx]];
 }
 
 function getDayKey(idx){
-  return ['push','pull','legs','recovery'][idx];
+  return DAY_KEYS[idx];
 }
 
 function shiftCycle(days){
@@ -444,7 +445,7 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
 
   // 已有 RM，计算训练目标次数
   const targetRep = Math.max(1, rm.reps - RIR_TARGET);
-  const tooLight = rm.reps > HYPERTROPHY_MAX; // RM次数超增肌区间=重量太轻
+  const tooLight = rm.reps > HYPERTROPHY_MAX; // RM超实用上限(>25)=次数过高效率低
   const nextW = tooLight ? getNextWeight(rm.weight) : null;
 
   // 情况2：有 RM 但无历史记录
@@ -452,10 +453,10 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
     return {
       type: 'first', rm: true, showTest: true,
       lastText: tooLight
-        ? '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' ⚠️太轻'
+        ? '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' ⚠️次数过高'
         : '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' (留' + RIR_TARGET + ')',
       suggestText: tooLight
-        ? '⚠️ ' + rm.reps + '次超增肌区间(≤12)！加重到' + nextW + '重测RM · 暂用' + rm.weight + '×' + targetRep + '次先练'
+        ? '⚠️ ' + rm.reps + '次超实用上限(>25)，效率低！加重到' + nextW + '重测RM · 暂用' + rm.weight + '×' + targetRep + '次先练'
         : '今天：' + rm.weight + ' × ' + targetRep + '次（你的' + rm.reps + 'RM，留' + RIR_TARGET + '次）',
       targetRep: targetRep, rmWeight: rm.weight, newWeight: nextW
     };
@@ -478,12 +479,12 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
 
   // 上次轻松完成（RPE≤7）
   if(lastRPE <= 7){
-    // RM本身太轻(>12次)→跳过加次/加组，直接加重重测
+    // RM次数过高(>25)→跳过加次/加组，直接加重重测
     if(tooLight){
       return {
         type: 'addWeight', rm: true,
-        lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅ · RM' + rm.reps + '⚠️太轻',
-        suggestText: 'RM=' + rm.reps + '次太轻，加重：' + nextW + ' × ' + exercise.minRep + '次 · 重测RM',
+        lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅ · RM' + rm.reps + '⚠️过高',
+        suggestText: 'RM=' + rm.reps + '次过高，加重：' + nextW + ' × ' + exercise.minRep + '次 · 重测RM',
         targetRep: exercise.minRep, rmWeight: rm.weight, newWeight: nextW
       };
     }
@@ -1011,7 +1012,7 @@ function saveRm(){
   render();
   if(r > HYPERTROPHY_MAX){
     const nw = getNextWeight(w);
-    alert('⚠️ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n\n次数超增肌区间(≤' + HYPERTROPHY_MAX + '次)——重量太轻了！\n建议加重到 ' + nw + ' 重新测RM，把力竭次数压回6-12次。\n（当前' + w + '×' + Math.max(1, r - RIR_TARGET) + '次先练也行，但增肌效率低）');
+    alert('⚠️ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n\n次数超实用上限(>' + HYPERTROPHY_MAX + '次)，效率偏低。\n建议加重到 ' + nw + ' 重测RM（5-30次均有效，但过高次数不适且弹力绳有天花板）。\n（当前' + w + '×' + Math.max(1, r - RIR_TARGET) + '次可继续练）');
   } else {
     const target = Math.max(1, r - RIR_TARGET);
     alert('✅ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n训练处方：' + w + ' × ' + target + '次（留' + RIR_TARGET + '次余量）');
@@ -1064,7 +1065,7 @@ function render(){
   let html = timerHtml;
 
   // Nutrition reminder
-  if(currentTab < 3){
+  if(dayKey !== 'recovery'){
     const lastSession = getLastSession(dayKey);
     let nutriExtra = '';
     if(lastSession){
