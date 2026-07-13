@@ -194,6 +194,34 @@ const WEIGHT_LADDER = ['15lb','20lb','25lb'];
 const RIR_TARGET = 2; // 训练留2次余量（≈RPE 8），RM减去它即为训练目标次数
 const HYPERTROPHY_MAX = 25; // 实用上限：RM超此值才提示加重（5-30次均有效，见Schoenfeld2017）
 
+// 动作标准（全程标准=力竭判定锚点 + 常见错误），综合自 ACE/NSCA/Mass General 等权威来源
+const ACTION_STANDARDS = {
+  '弹力绳卧推': {anchor:'底部手肘近地、顶部推至手臂伸直（不锁肘）', errors:'肩胛不收紧、肘外展>45°（肩峰撞击风险）、手腕后翻'},
+  '弹力绳面拉': {anchor:'手柄到面部 + 肩胛明确后缩', errors:'只用手臂拉不夹背、锚点过低做成前平举'},
+  '弹力绳站姿推举': {anchor:'顶部肘近直过头、底部手柄回肩', errors:'腰椎前倾代偿、推时身体后仰、耸肩'},
+  '弹力绳侧平举': {anchor:'大臂水平（不高于肩）', errors:'甩重量借力、耸肩、顶部超过肩高'},
+  '弹力绳夹胸': {anchor:'双手体前相触（不交叉）', errors:'用惯性甩、肘伸太直、回放过快借回弹'},
+  '弹力绳臂屈伸': {anchor:'底部臂近直向下、肘不离身', errors:'肘外撇、用身体晃、下放不完整'},
+  '弹力绳划船': {anchor:'手柄触下腹 + 肩胛后缩', errors:'含胸圆肩、用惯性、肘外撇不贴身'},
+  '弹力绳高位下拉': {anchor:'手柄到锁骨（部分行程则到当前能到的最高点）', errors:'身体后仰甩、耸肩、下放不完全'},
+  '弹力绳单臂划船': {anchor:'手拉向髋、肘尖向后上方', errors:'背不直、身体晃、用惯性'},
+  '弹力绳弯举': {anchor:'顶部二头峰收缩、底部臂直不甩', errors:'肘前移/晃身借力、下放过快'},
+  '锤式弯举': {anchor:'顶部二头+肱肌收缩、底部伸直', errors:'肘晃、借力甩'},
+  '弹力绳深蹲': {anchor:'底部大腿水平（髋低于膝）、顶部站直', errors:'膝内扣、脚跟离地、圆背、蹲太浅'},
+  '弹力绳罗马尼亚硬拉': {anchor:'底部躯干近水平 + 腘绳拉伸', errors:'圆背、蹲而非铰（膝角应不变）、颈前伸'},
+  '弹力绳臀桥': {anchor:'顶部肩-髋-膝直线、不超伸腰', errors:'用腰顶而非臀、顶部腰椎超伸'},
+  '弹力绳弓步蹲': {anchor:'前腿大腿水平、后膝近地', errors:'前膝超脚尖、躯干俯身、后膝触地'},
+  '弹力绳髋外展': {anchor:'顶部臀中肌明显收缩、躯干不倾', errors:'幅度过大甩、腰代偿'},
+  '保加利亚分腿蹲': {anchor:'底部前腿水平、后膝近地', errors:'前膝超脚尖、身体前倾、后脚踝不稳'},
+  '弹力绳腿弯举': {anchor:'顶部脚跟近臀、腘绳峰收缩', errors:'髋抬起离地代偿、甩腿'},
+  '平板支撑': {anchor:'身体直线、腰不塌臀不翘', errors:'塌腰、撅臀、憋气过久'},
+  '死虫式': {anchor:'对侧手脚下放、下背贴地', errors:'下背拱起离地'},
+  '侧支撑(左)': {anchor:'身体斜线、髋不下沉', errors:'髋下沉、身体前倒'},
+  '侧支撑(右)': {anchor:'身体斜线、髋不下沉', errors:'髋下沉、身体前倒'},
+  '反向卷腹': {anchor:'骨盆向上卷、下腹发力', errors:'用腿摆代偿'},
+  '俯卧撑': {anchor:'底部胸近地、顶部肘伸直', errors:'塌腰/撅臀、手肘外展>45°、底部不触程'}
+};
+
 const PLAN = {
   push: {
     name:'推力日', emoji:'💪',
@@ -1114,8 +1142,10 @@ function render(){
         html += '</div>';
 
         if(ex.detail){
-          html += '<span class="ex-toggle" onclick="toggleDetail(\'' + exId + '\')">💡 动作要点</span>';
-          html += '<div class="ex-detail" id="' + exId + '">' + ex.detail + '</div>';
+          const std = ACTION_STANDARDS[ex.name];
+          const stdHtml = std ? '<br><span style="color:#c9a227">📏 全程标准：' + std.anchor + '</span><br><span style="color:#e07a5f">⚠️ 常见错误：' + std.errors + '</span>' : '';
+          html += '<span class="ex-toggle" onclick="toggleDetail(\'' + exId + '\')">💡 动作要点（含标准）</span>';
+          html += '<div class="ex-detail" id="' + exId + '">' + ex.detail + stdHtml + '</div>';
         }
         html += '</div></div>';
       });
