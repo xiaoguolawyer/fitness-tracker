@@ -191,6 +191,7 @@ const DEFAULT_CYCLE_START = '2026-06-14'; // 已含1天顺延
 const DAYS = ['推力+HIIT','拉力+核心','下肢+HIIT','主动恢复'];
 const WEIGHT_LADDER = ['15lb','20lb','25lb'];
 const RIR_TARGET = 2; // 训练留2次余量（≈RPE 8），RM减去它即为训练目标次数
+const HYPERTROPHY_MAX = 12; // 增肌最优次数区间上限，RM超此值=重量太轻应加重
 
 const PLAN = {
   push: {
@@ -411,6 +412,13 @@ function bumpWeight(w){
   return (num + add) + (unit ? unit : '');
 }
 
+// 取下一档重量：弹力绳按档位跳(15→20→25)，到顶或自由重量用bumpWeight
+function getNextWeight(w){
+  const wi = WEIGHT_LADDER.indexOf(w);
+  if(wi >= 0 && wi < WEIGHT_LADDER.length - 1) return WEIGHT_LADDER[wi + 1];
+  return bumpWeight(w);
+}
+
 // RM 锚定处方：训练次数 = RM次数 - 留余量(RIR_TARGET)
 function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
   const rm = getRm(exercise.name);
@@ -436,14 +444,20 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
 
   // 已有 RM，计算训练目标次数
   const targetRep = Math.max(1, rm.reps - RIR_TARGET);
+  const tooLight = rm.reps > HYPERTROPHY_MAX; // RM次数超增肌区间=重量太轻
+  const nextW = tooLight ? getNextWeight(rm.weight) : null;
 
   // 情况2：有 RM 但无历史记录
   if(!lastEx){
     return {
       type: 'first', rm: true, showTest: true,
-      lastText: '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' (留' + RIR_TARGET + ')',
-      suggestText: '今天：' + rm.weight + ' × ' + targetRep + '次（你的' + rm.reps + 'RM，留' + RIR_TARGET + '次）',
-      targetRep: targetRep, rmWeight: rm.weight
+      lastText: tooLight
+        ? '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' ⚠️太轻'
+        : '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' (留' + RIR_TARGET + ')',
+      suggestText: tooLight
+        ? '⚠️ ' + rm.reps + '次超增肌区间(≤12)！加重到' + nextW + '重测RM · 暂用' + rm.weight + '×' + targetRep + '次先练'
+        : '今天：' + rm.weight + ' × ' + targetRep + '次（你的' + rm.reps + 'RM，留' + RIR_TARGET + '次）',
+      targetRep: targetRep, rmWeight: rm.weight, newWeight: nextW
     };
   }
 
@@ -464,6 +478,15 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
 
   // 上次轻松完成（RPE≤7）
   if(lastRPE <= 7){
+    // RM本身太轻(>12次)→跳过加次/加组，直接加重重测
+    if(tooLight){
+      return {
+        type: 'addWeight', rm: true,
+        lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次 · RPE' + lastRPE + ' ✅ · RM' + rm.reps + '⚠️太轻',
+        suggestText: 'RM=' + rm.reps + '次太轻，加重：' + nextW + ' × ' + exercise.minRep + '次 · 重测RM',
+        targetRep: exercise.minRep, rmWeight: rm.weight, newWeight: nextW
+      };
+    }
     const roomToAdd = (lastRep + 1) < rm.reps; // 还能再加1次且不到RM
     if(roomToAdd){
       // 加1次
@@ -484,16 +507,13 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
       };
     }
     // 组数也到顶 → 加重并提示重测 RM
-    const wi = WEIGHT_LADDER.indexOf(rm.weight);
-    let nextW = null;
-    if(wi >= 0 && wi < WEIGHT_LADDER.length - 1) nextW = WEIGHT_LADDER[wi + 1];
-    else nextW = bumpWeight(rm.weight);
-    if(nextW){
+    const nextW2 = getNextWeight(rm.weight);
+    if(nextW2){
       return {
         type: 'addWeight', rm: true,
         lastText: '上次 ' + dateStr + ': ' + lastEx.weight + ' × ' + lastEx.completedSets + '组 · ' + lastRep + '次(RM-1) · RPE' + lastRPE + ' ✅',
-        suggestText: '已达' + rm.reps + 'RM上限，加重：' + nextW + ' × ' + exercise.minRep + '次 · 重测RM',
-        targetRep: exercise.minRep, rmWeight: nextW, newWeight: nextW
+        suggestText: '已达' + rm.reps + 'RM上限，加重：' + nextW2 + ' × ' + exercise.minRep + '次 · 重测RM',
+        targetRep: exercise.minRep, rmWeight: nextW2, newWeight: nextW2
       };
     }
   }
@@ -989,8 +1009,13 @@ function saveRm(){
   saveRmStore();
   closeModal('rmModal');
   render();
-  const target = Math.max(1, r - RIR_TARGET);
-  alert('✅ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n训练处方：' + w + ' × ' + target + '次（留' + RIR_TARGET + '次余量）');
+  if(r > HYPERTROPHY_MAX){
+    const nw = getNextWeight(w);
+    alert('⚠️ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n\n次数超增肌区间(≤' + HYPERTROPHY_MAX + '次)——重量太轻了！\n建议加重到 ' + nw + ' 重新测RM，把力竭次数压回6-12次。\n（当前' + w + '×' + Math.max(1, r - RIR_TARGET) + '次先练也行，但增肌效率低）');
+  } else {
+    const target = Math.max(1, r - RIR_TARGET);
+    alert('✅ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n训练处方：' + w + ' × ' + target + '次（留' + RIR_TARGET + '次余量）');
+  }
 }
 
 // ============ RENDER ============
