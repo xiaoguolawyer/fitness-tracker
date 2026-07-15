@@ -199,7 +199,7 @@ const ACTION_STANDARDS = {
   '弹力绳面拉': {anchor:'手柄到面部 + 肩胛明确后缩', errors:'只用手臂拉不夹背、锚点过低做成前平举'},
   '弹力绳站姿推举': {anchor:'顶部肘近直过头、底部手柄回肩', errors:'腰椎前倾代偿、推时身体后仰、耸肩'},
   '弹力绳侧平举': {anchor:'大臂水平（不高于肩）', errors:'甩重量借力、耸肩、顶部超过肩高'},
-  '弹力绳夹胸': {anchor:'双手体前相触（不交叉）', errors:'用惯性甩、肘伸太直、回放过快借回弹'},
+  '弹力绳夹胸': {anchor:'双手体前相触（不交叉）；锚点胸高（非高位）', errors:'用惯性甩、肘伸太直、回放过快借回弹、锚点过高致肩前束代偿'},
   '弹力绳臂屈伸': {anchor:'底部臂近直向下、肘不离身', errors:'肘外撇、用身体晃、下放不完整'},
   '弹力绳划船': {anchor:'手柄触下腹 + 肩胛后缩', errors:'含胸圆肩、用惯性、肘外撇不贴身'},
   '弹力绳高位下拉': {anchor:'手柄到锁骨（部分行程则到当前能到的最高点）', errors:'身体后仰甩、耸肩、下放不完全'},
@@ -235,7 +235,7 @@ const PLAN = {
         {name:'弹力绳侧平举',weight:'15lb',minRep:12,maxRep:15,detail:'踩绳，手垂体侧。微屈肘，肩关节为轴上抬至水平，拇指略朝下。身体不晃——晃了=太重。'}
       ]},
       {label:'超集C',rounds:3,rest:60,items:[
-        {name:'弹力绳夹胸',weight:'15lb',minRep:12,maxRep:15,detail:'门锚高位，背对门微前倾。向胸前合拢像抱大树，合拢处停1秒挤胸肌。打开时控制，不靠弹力回弹。'},
+        {name:'弹力绳夹胸',weight:'15lb',minRep:12,maxRep:15,detail:'门锚胸口高度（约乳头/胸骨线），背对门微前倾。双臂由体侧水平向胸前中线合拢、双手在胸前沿前几乎相触，合拢处停1秒用力挤胸肌（想象用胸把绳柄夹到一起）。慢放打开、感受胸肌被拉伸，不借弹力回弹、不耸肩。胸高锚点=水平内收练中胸；原"门锚高位"会把力引向肩前束/斜方，导致胸没感觉（已修正）。'},
         {name:'弹力绳臂屈伸',weight:'15lb',minRep:12,maxRep:15,detail:'门锚低位。双手过头握把，上臂贴耳固定——只有前臂在动。伸直时缩三头肌，弯时慢放。'}
       ]}
     ],
@@ -474,7 +474,9 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
   }
 
   // 已有 RM，计算训练目标次数
-  const targetRep = Math.max(1, rm.reps - RIR_TARGET);
+  // 自重动作无法加重，4组累积疲劳下 RM-2 难以维持，且 RM 测试有 ±2 次误差 → 多留1次余量(RIR 3)
+  const rirForTarget = isBodyweight(rm.weight) ? RIR_TARGET + 1 : RIR_TARGET;
+  const targetRep = Math.max(1, rm.reps - rirForTarget);
   const tooLight = rm.reps > HYPERTROPHY_MAX; // RM超实用上限(>25)=次数过高效率低
   const nextW = tooLight ? getNextWeight(rm.weight) : null;
 
@@ -484,12 +486,12 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
       type: 'first', rm: true, showTest: true,
       lastText: tooLight
         ? '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' ⚠️次数过高'
-        : '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' (留' + RIR_TARGET + ')',
+        : '🔬 RM ' + rm.weight + ' × ' + rm.reps + ' (留' + rirForTarget + ')',
       suggestText: tooLight
         ? (isBodyweight(rm.weight)
             ? '⚠️ ' + rm.reps + '次超实用上限(>25)，效率低！换更难变式重测RM · 暂用' + rm.weight + '×' + targetRep + '次先练'
             : '⚠️ ' + rm.reps + '次超实用上限(>25)，效率低！加重到' + nextW + '重测RM · 暂用' + rm.weight + '×' + targetRep + '次先练')
-        : '今天：' + rm.weight + ' × ' + targetRep + '次（你的' + rm.reps + 'RM，留' + RIR_TARGET + '次）',
+        : '今天：' + rm.weight + ' × ' + targetRep + '次（你的' + rm.reps + 'RM，留' + rirForTarget + '次）',
       targetRep: targetRep, rmWeight: rm.weight, newWeight: nextW
     };
   }
@@ -1053,7 +1055,7 @@ function saveRm(){
     const hint = bw ? '换更难变式重测RM（如脚抬高/窄距）' : ('加重到 ' + getNextWeight(w) + ' 重测RM');
     alert('⚠️ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n\n次数超实用上限(>' + HYPERTROPHY_MAX + '次)，效率偏低。\n建议' + hint + '（5-30次均有效，但过高次数不适且弹力绳有天花板）。\n（当前' + w + '×' + Math.max(1, r - RIR_TARGET) + '次可继续练）');
   } else {
-    const target = Math.max(1, r - RIR_TARGET);
+    const target = Math.max(1, r - (isBodyweight(w) ? RIR_TARGET + 1 : RIR_TARGET));
     alert('✅ 已记录 ' + rmModalEx + ' 的 ' + r + 'RM = ' + w + '\n训练处方：' + w + ' × ' + target + '次（留' + RIR_TARGET + '次余量）');
   }
 }
