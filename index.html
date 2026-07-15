@@ -1080,7 +1080,7 @@ function render(){
 
   // Tabs
   let tabsHtml = '';
-  for(let i = 0; i < 4; i++){
+  for(let i = 0; i < DAYS.length; i++){
     const cls = ['tab'];
     if(i === currentTab) cls.push('active');
     if(i === todayIdx) cls.push('today');
