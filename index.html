@@ -667,6 +667,12 @@ function getProgressionSuggestion(dayKey, ssIdx, exIdx, exercise){
   };
 }
 
+// 渐进建议为「加组」时，打卡界面应渲染多出的一组（上限4组，与建议自身封顶一致）
+function effectiveRounds(dayKey, ss, ssIdx, exIdx, ex){
+  const s = getProgressionSuggestion(dayKey, ssIdx, exIdx, ex);
+  return Math.min(4, ss.rounds + (s && s.type === 'addSet' ? 1 : 0));
+}
+
 // ============ 打卡状态管理 ============
 function toggleSet(key){
   const parts = key.split('_');
@@ -739,7 +745,8 @@ function countDone(){
   if(plan.supersets){
     plan.supersets.forEach((ss, ssIdx) => {
       ss.items.forEach((ex, exIdx) => {
-        for(let i = 0; i < ss.rounds; i++){
+        const er = effectiveRounds(dayKey, ss, ssIdx, exIdx, ex);
+        for(let i = 0; i < er; i++){
           total++;
           if(isSetDone(dayKey, ssIdx, exIdx, i)) done++;
         }
@@ -832,7 +839,7 @@ async function confirmSave(){
         session.exercises.push({
           name: ex.name, ssIdx: ssIdx, exIdx: exIdx,
           weight: weight,
-          plannedSets: ss.rounds,
+          plannedSets: effectiveRounds(dayKey, ss, ssIdx, exIdx, ex),
           completedSets: doneSets,
           achievedRep: reps,
           rpe: rpe
@@ -1677,9 +1684,10 @@ function render(){
         html += '<div class="ex-progress last">📊 ' + suggestion.lastText + '</div>';
         html += '<div class="ex-progress ' + suggestClass + '">🎯 ' + suggestion.suggestText + '</div>';
 
-        // Set circles
+        // Set circles（组数跟随渐进建议：加组时多渲染一组，上限4）
+        const er = effectiveRounds(dayKey, ss, ssIdx, exIdx, ex);
         html += '<div class="sets">';
-        for(let i = 0; i < ss.rounds; i++){
+        for(let i = 0; i < er; i++){
           const isDone = isSetDone(dayKey, ssIdx, exIdx, i);
           html += '<div class="set ' + (isDone ? 'done' : '') + '" onclick="toggleSet(\'' + dayKey + '_' + ssIdx + '_' + exIdx + '_' + i + '\')">' + (isDone ? '✓' : i + 1) + '</div>';
         }
@@ -1699,7 +1707,7 @@ function render(){
 
   // Core
   if(plan.core){
-    html += '<div class="block"><div class="block-title"><strong>核心循环</strong><span class="info">4动作 · 2轮 · 各45s</span></div>';
+    html += '<div class="block"><div class="block-title"><strong>核心循环</strong><span class="info">' + plan.core.length + '动作 · 2轮 · 各45s</span></div>';
     plan.core.forEach((c, i) => {
       const cId = 'core_detail_' + currentTab + '_' + i;
       html += '<div class="exercise"><div class="ex-con">';
