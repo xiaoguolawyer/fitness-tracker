@@ -702,13 +702,21 @@ function toggleHiit(round){
   render();
 }
 
-function toggleCore(idx){
+// 核心按轮整体勾选：state 形如 { "0":2, "1":1 } 表示各动作已完成轮数(0/1/2)
+function getCoreState(dayKey){
+  const s = checkedState['core_' + dayKey];
+  if(Array.isArray(s)){ const o = {}; s.forEach(i => { o[i] = 1; }); return o; }
+  return s || {};
+}
+// round: 0=第1轮, 1=第2轮。点一下把整轮所有动作标记完成，再点取消该轮
+function toggleCoreRound(round){
   const dayKey = getDayKey(currentTab);
-  if(!checkedState['core_' + dayKey]) checkedState['core_' + dayKey] = [];
-  const arr = checkedState['core_' + dayKey];
-  const pos = arr.indexOf(idx);
-  if(pos >= 0) arr.splice(pos, 1);
-  else arr.push(idx);
+  const plan = getPlan(currentTab);
+  const st = getCoreState(dayKey);
+  const target = round + 1;
+  const allAt = plan.core.every((_, i) => (st[i] || 0) >= target);
+  plan.core.forEach((_, i) => { st[i] = allAt ? Math.max(0, target - 1) : Math.max(st[i] || 0, target); });
+  checkedState['core_' + dayKey] = st;
   saveState();
   render();
 }
@@ -734,8 +742,10 @@ function isHiitDone(dayKey, round){
   return (checkedState['hiit_' + dayKey] || []).includes(round);
 }
 
-function isCoreDone(dayKey, idx){
-  return (checkedState['core_' + dayKey] || []).includes(idx);
+function coreRoundDone(dayKey, round){
+  const st = getCoreState(dayKey);
+  const plan = getPlan(currentTab);
+  return plan.core.every((_, i) => (st[i] || 0) >= round + 1);
 }
 
 function countDone(){
@@ -757,7 +767,8 @@ function countDone(){
     for(let i = 0; i < 4; i++){ total++; if(isHiitDone(dayKey, i)) done++; }
   }
   if(plan.core){
-    plan.core.forEach((c, i) => { total++; if(isCoreDone(dayKey, i)) done++; });
+    const coreSt = getCoreState(dayKey);
+    plan.core.forEach((_, i) => { const r = Math.min(2, coreSt[i] || 0); total += 2; done += r; });
   }
   if(plan.items){
     plan.items.forEach((item, i) => {
@@ -859,9 +870,12 @@ async function confirmSave(){
 
   // Core
   if(plan.core){
+    const coreSt = getCoreState(dayKey);
+    let coreDone = 0;
+    plan.core.forEach((_, i) => { coreDone += Math.min(2, coreSt[i] || 0); });
     session.core = {
-      completed: (checkedState['core_' + dayKey] || []).length,
-      total: plan.core.length
+      completed: coreDone,
+      total: plan.core.length * 2
     };
   }
 
@@ -1082,7 +1096,7 @@ function showHistory(){
         });
       }
       if(entry.hiit) html += 'HIIT: ' + entry.hiit.completed + '/' + entry.hiit.total + '轮<br>';
-      if(entry.core) html += '核心: ' + entry.core.completed + '/' + entry.core.total + '个<br>';
+      if(entry.core) html += '核心: ' + entry.core.completed + '/' + entry.core.total + ' (动作×轮)<br>';
       if(entry.recoveryItems){
         entry.recoveryItems.forEach(r => {
           html += (r.done ? '✅ ' : '☐ ') + r.name + '<br>';
@@ -1705,7 +1719,7 @@ function render(){
     });
   }
 
-  // Core
+  // Core（按轮整体勾选：做完一轮全部动作勾一次）
   if(plan.core){
     html += '<div class="block"><div class="block-title"><strong>核心循环</strong><span class="info">' + plan.core.length + '动作 · 2轮 · 各45s</span></div>';
     plan.core.forEach((c, i) => {
@@ -1716,9 +1730,12 @@ function render(){
         html += '<span class="ex-toggle" onclick="toggleDetail(\'' + cId + '\')">💡 要点</span>';
         html += '<div class="ex-detail" id="' + cId + '">' + c.detail + '</div>';
       }
-      html += '<div class="sets"><div class="set ' + (isCoreDone(dayKey, i) ? 'done' : '') + '" style="width:auto;padding:0 10px;border-radius:14px" onclick="toggleCore(' + i + ')">' + (isCoreDone(dayKey, i) ? '✓ 完成' : '☐ 打卡') + '</div></div>';
       html += '</div></div>';
     });
+    html += '<div class="sets" style="margin-top:8px">';
+    html += '<div class="set ' + (coreRoundDone(dayKey, 0) ? 'done' : '') + '" style="width:auto;padding:0 14px;border-radius:14px" onclick="toggleCoreRound(0)">' + (coreRoundDone(dayKey, 0) ? '✓ 第1轮' : '☐ 第1轮') + '</div>';
+    html += '<div class="set ' + (coreRoundDone(dayKey, 1) ? 'done' : '') + '" style="width:auto;padding:0 14px;border-radius:14px" onclick="toggleCoreRound(1)">' + (coreRoundDone(dayKey, 1) ? '✓ 第2轮' : '☐ 第2轮') + '</div>';
+    html += '</div>';
     html += '</div>';
   }
 
