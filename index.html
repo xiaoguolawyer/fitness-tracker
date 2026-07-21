@@ -177,6 +177,7 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
     <button class="shift-btn" onclick="shiftCycle(1)">⏭ 今天没练 → 顺延</button>
     <button class="shift-btn" onclick="showSettings()">⚙️ 设置</button>
     <button class="shift-btn" onclick="manualClean()" style="border-color:#4ade80;color:#4ade80">🧹 清理空记录</button>
+    <button class="shift-btn" onclick="restoreFromCloud()" style="border-color:#60a5fa;color:#60a5fa">☁️ 从云端恢复</button>
     <button class="shift-btn" onclick="showHistory()">📋 历史</button>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -417,6 +418,8 @@ function init(){
   const removedEmpty = cleanEmptyRecords();
   render();
   if(removedEmpty > 0) console.log('[健身] 已自动清理 ' + removedEmpty + ' 条空记录');
+  // 本地 RM 为空时自动从云端拉回（换地址/设备不丢基准数据）
+  autoRestoreRmIfEmpty();
 }
 
 function loadJSON(key, fallback){
@@ -1040,6 +1043,57 @@ async function manualClean(){
   } else {
     alert('✅ 没有空记录，历史干净');
   }
+}
+
+// ============ 从云端恢复（gist 为 public，无需令牌即可读取） ============
+async function doRestore(url, verbose){
+  try{
+    const res = await fetch(url, { cache:'no-store' });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    // RM 合并：按动作名取较新日期
+    const impRm = data.rmRecords || data.rm || {};
+    let added=0, updated=0;
+    Object.keys(impRm).forEach(k=>{
+      const inc = impRm[k];
+      const ex = rmRecords[k];
+      if(!ex){ rmRecords[k]=inc; added++; }
+      else if(new Date(inc.date) >= new Date(ex.date)){ rmRecords[k]=inc; updated++; }
+    });
+    // history / state 仅在手动全量模式合并，避免覆盖本机进度
+    if(verbose && Array.isArray(data.history)){
+      const hmap={};
+      (history||[]).forEach(h=>{ if(h&&h.date) hmap[h.date]=h; });
+      data.history.forEach(h=>{ if(h&&h.date) hmap[h.date]=h; });
+      history = Object.keys(hmap).sort().map(k=>hmap[k]);
+    }
+    if(verbose && data.state) checkedState = data.state;
+    saveRmStore();
+    if(verbose){ saveHistory(); saveState(); }
+    render();
+    if(verbose){
+      alert('☁️ 已从云端恢复！\n新增 RM: '+added+' 组 · 更新 RM: '+updated+' 组\n共 '+Object.keys(rmRecords).length+' 组 RM'+(history.length?(' / '+history.length+' 条历史'):''));
+    } else if(added+updated>0){
+      console.log('[健身] 自动从云端恢复 RM '+added+' 新增 / '+updated+' 更新');
+    }
+  }catch(e){
+    if(verbose) alert('❌ 恢复失败：'+e.message+'\n请确认「AI 读取地址」正确且网络可访问 gist。');
+    else console.warn('[健身] 自动恢复 RM 失败：'+e.message);
+  }
+}
+async function restoreFromCloud(){
+  let url = localStorage.getItem('fitness_sync_url');
+  if(!url){
+    url = prompt('请输入「AI 读取地址」（在能同步的设备上：设置→云端同步→复制AI读取地址）：');
+    if(!url) return;
+  }
+  await doRestore(url, true);
+}
+function autoRestoreRmIfEmpty(){
+  if(Object.keys(rmRecords||{}).length > 0) return; // 本地已有 RM，不覆盖
+  const url = localStorage.getItem('fitness_sync_url');
+  if(!url) return;
+  doRestore(url, false);
 }
 
 function resetSync(){
