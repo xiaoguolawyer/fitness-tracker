@@ -22,7 +22,7 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
 .tab{flex:1;min-width:60px;padding:8px 4px;text-align:center;font-size:12px;border-radius:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#888;cursor:pointer;white-space:nowrap}
 .tab.active{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
 .tab.today{box-shadow:0 0 0 2px #3b82f6}
-.shift-bar{display:flex;gap:8px;margin:6px 0;align-items:center}
+.shift-bar{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0;align-items:center}
 .shift-btn{font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #555;background:#1a1a1a;color:#aaa;cursor:pointer;white-space:nowrap}
 .shift-btn:active{background:#333}
 .shift-btn.danger{border-color:#ef4444;color:#ef4444}
@@ -176,6 +176,7 @@ h3{font-size:15px;margin:16px 0 6px;color:#aaa}
   <div class="shift-bar">
     <button class="shift-btn" onclick="shiftCycle(1)">⏭ 今天没练 → 顺延</button>
     <button class="shift-btn" onclick="showSettings()">⚙️ 设置</button>
+    <button class="shift-btn" onclick="manualClean()" style="border-color:#4ade80;color:#4ade80">🧹 清理空记录</button>
     <button class="shift-btn" onclick="showHistory()">📋 历史</button>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -1029,11 +1030,16 @@ function cleanEmptyRecords(){
   }
   return removed;
 }
-function manualClean(){
-  const removed = cleanEmptyRecords();
+async function manualClean(){
+  const removed = cleanEmptyRecords(); // 已清理本机并触发推送
   render();
-  if(removed > 0) alert('🧹 已清理 ' + removed + ' 条空记录，并已同步到云端');
-  else alert('✅ 没有空记录，历史干净');
+  if(removed > 0){
+    const r = await pushToGist(); // 二次确认云端结果，避免"假装成功"
+    if(r.ok) alert('🧹 已清理 ' + removed + ' 条空记录，并已同步到云端 ✓');
+    else alert('🧹 本机已清理 ' + removed + ' 条空记录，但云端同步失败：' + r.msg + '\n请打开设置→云端同步点「测试同步」重试');
+  } else {
+    alert('✅ 没有空记录，历史干净');
+  }
 }
 
 function resetSync(){
