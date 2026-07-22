@@ -282,6 +282,8 @@ const DAY_KEYS = ['push','pull','legs','push','pull','legs','recovery'];
 const WEIGHT_LADDER = ['15lb','20lb','25lb'];
 const RIR_TARGET = 2; // 训练留2次余量（≈RPE 8），RM减去它即为训练目标次数
 const HYPERTROPHY_MAX = 25; // 实用上限：RM超此值才提示加重（5-30次均有效，见Schoenfeld2017）
+// 公网只读地址兜底：gist 为 public，无需令牌即可读取。用于新地址/设备自动恢复（写仍需本机令牌）
+const DEFAULT_SYNC_URL = 'https://gist.githubusercontent.com/xiaoguolawyer/fdf7e384db340a2492f105017f3e0b50/raw/fitness-sync.json';
 
 // 动作标准（全程标准=力竭判定锚点 + 常见错误），综合自 ACE/NSCA/Mass General 等权威来源
 const ACTION_STANDARDS = {
@@ -418,8 +420,8 @@ function init(){
   const removedEmpty = cleanEmptyRecords();
   render();
   if(removedEmpty > 0) console.log('[健身] 已自动清理 ' + removedEmpty + ' 条空记录');
-  // 本地 RM 为空时自动从云端拉回（换地址/设备不丢基准数据）
-  autoRestoreRmIfEmpty();
+  // 本地 RM 或历史为空时自动从云端拉回（换地址/设备不丢数据）
+  autoRestoreIfEmpty();
 }
 
 function loadJSON(key, fallback){
@@ -829,6 +831,7 @@ async function confirmSave(){
   const date = new Date().toISOString().split('T')[0];
 
   const session = {
+    id: date + '-' + Date.now().toString(36),
     date: date,
     dayKey: dayKey,
     dayName: plan.name,
@@ -1060,21 +1063,30 @@ async function doRestore(url, verbose){
       if(!ex){ rmRecords[k]=inc; added++; }
       else if(new Date(inc.date) >= new Date(ex.date)){ rmRecords[k]=inc; updated++; }
     });
-    // history / state 仅在手动全量模式合并，避免覆盖本机进度
-    if(verbose && Array.isArray(data.history)){
-      const hmap={};
-      (history||[]).forEach(h=>{ if(h&&h.date) hmap[h.date]=h; });
-      data.history.forEach(h=>{ if(h&&h.date) hmap[h.date]=h; });
-      history = Object.keys(hmap).sort().map(k=>hmap[k]);
+    // 历史合并：本机为空→直接采用云端全量（含同日多记录），再清理空记录；本机非空→按唯一 id 并集（无 id 用日期兜底）
+    let historyMerged = false;
+    if(Array.isArray(data.history) && (verbose || (history||[]).length === 0)){
+      if((history||[]).length === 0){
+        history = data.history.slice();
+        cleanEmptyRecords();
+      } else {
+        const hmap={};
+        const keyOf = (h) => (h && h.id) ? ('id:'+h.id) : ('d:'+(h && h.date));
+        (history||[]).forEach(h=>{ hmap[keyOf(h)] = h; });
+        data.history.forEach(h=>{ hmap[keyOf(h)] = h; });
+        history = Object.values(hmap);
+      }
+      historyMerged = true;
     }
     if(verbose && data.state) checkedState = data.state;
     saveRmStore();
-    if(verbose){ saveHistory(); saveState(); }
+    if(historyMerged) saveHistory();
+    if(verbose) saveState();
     render();
     if(verbose){
       alert('☁️ 已从云端恢复！\n新增 RM: '+added+' 组 · 更新 RM: '+updated+' 组\n共 '+Object.keys(rmRecords).length+' 组 RM'+(history.length?(' / '+history.length+' 条历史'):''));
-    } else if(added+updated>0){
-      console.log('[健身] 自动从云端恢复 RM '+added+' 新增 / '+updated+' 更新');
+    } else if(added+updated>0 || historyMerged){
+      console.log('[健身] 自动从云端恢复 RM '+added+' 新增 / '+updated+' 更新'+(historyMerged?(' / 历史 '+history.length+' 条'):''));
     }
   }catch(e){
     if(verbose) alert('❌ 恢复失败：'+e.message+'\n请确认「AI 读取地址」正确且网络可访问 gist。');
@@ -1082,18 +1094,20 @@ async function doRestore(url, verbose){
   }
 }
 async function restoreFromCloud(){
-  let url = localStorage.getItem('fitness_sync_url');
+  let url = localStorage.getItem('fitness_sync_url') || DEFAULT_SYNC_URL;
   if(!url){
     url = prompt('请输入「AI 读取地址」（在能同步的设备上：设置→云端同步→复制AI读取地址）：');
     if(!url) return;
   }
   await doRestore(url, true);
 }
-function autoRestoreRmIfEmpty(){
-  if(Object.keys(rmRecords||{}).length > 0) return; // 本地已有 RM，不覆盖
-  const url = localStorage.getItem('fitness_sync_url');
+function autoRestoreIfEmpty(){
+  const url = localStorage.getItem('fitness_sync_url') || DEFAULT_SYNC_URL;
   if(!url) return;
-  doRestore(url, false);
+  // 本机 RM 或历史为空时，从云端拉回（换地址/设备不丢数据）
+  if(Object.keys(rmRecords||{}).length === 0 || (history||[]).length === 0){
+    doRestore(url, false);
+  }
 }
 
 function resetSync(){
