@@ -898,9 +898,9 @@ async function confirmSave(){
     return;
   }
 
-  // 保存到历史
+  // 保存到历史（保存前先清理历史中的空记录，避免每次保存累积垃圾）
   history.push(session);
-  saveHistory();
+  cleanEmptyRecords(); // 移除 exercises 为空的条目，保留本次有效记录
 
   // 清除当天打卡状态
   Object.keys(checkedState).forEach(k => {
