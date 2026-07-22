@@ -1063,19 +1063,23 @@ async function doRestore(url, verbose){
       if(!ex){ rmRecords[k]=inc; added++; }
       else if(new Date(inc.date) >= new Date(ex.date)){ rmRecords[k]=inc; updated++; }
     });
-    // 历史合并：本机为空→直接采用云端全量（含同日多记录），再清理空记录；本机非空→按唯一 id 并集（无 id 用日期兜底）
+    // 历史合并：云端全量与本机并集（云端为最新真源，优先；按唯一 id 去重，无 id 用日期兜底）。无论本机是否为空都合并，避免本机有记录时丢弃云端全量。
     let historyMerged = false;
-    if(Array.isArray(data.history) && (verbose || (history||[]).length === 0)){
-      if((history||[]).length === 0){
-        history = data.history.slice();
-        cleanEmptyRecords();
-      } else {
-        const hmap={};
-        const keyOf = (h) => (h && h.id) ? ('id:'+h.id) : ('d:'+(h && h.date));
-        (history||[]).forEach(h=>{ hmap[keyOf(h)] = h; });
-        data.history.forEach(h=>{ hmap[keyOf(h)] = h; });
-        history = Object.values(hmap);
-      }
+    if(Array.isArray(data.history)){
+      const seen = new Set();
+      const merged = [];
+      const add = (h) => {
+        if(!h || !h.date) return;
+        const key = (h.id) ? ('id:'+h.id) : ('d:'+h.date);
+        if(seen.has(key)) return;
+        seen.add(key);
+        merged.push(h);
+      };
+      data.history.forEach(add);   // 云端优先
+      (history||[]).forEach(add);  // 补本机独有
+      history = merged.sort((a,b)=> (a.date < b.date ? -1 : (a.date > b.date ? 1 : 0)));
+      // 合并后剔除空记录（纯过滤，不触发推送，避免自动恢复误覆盖云端）
+      history = history.filter(h => h && Array.isArray(h.exercises) && h.exercises.length > 0);
       historyMerged = true;
     }
     if(verbose && data.state) checkedState = data.state;
@@ -1104,10 +1108,8 @@ async function restoreFromCloud(){
 function autoRestoreIfEmpty(){
   const url = localStorage.getItem('fitness_sync_url') || DEFAULT_SYNC_URL;
   if(!url) return;
-  // 本机 RM 或历史为空时，从云端拉回（换地址/设备不丢数据）
-  if(Object.keys(rmRecords||{}).length === 0 || (history||[]).length === 0){
-    doRestore(url, false);
-  }
+  // 云端为全量真源，每次打开都与本机并集（不要求本机为空）。本机有记录也不丢云端数据。
+  doRestore(url, false);
 }
 
 function resetSync(){
